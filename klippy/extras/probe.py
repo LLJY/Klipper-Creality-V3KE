@@ -23,6 +23,8 @@ class PrinterProbe:
         self.x_offset = config.getfloat('x_offset', 0.)
         self.y_offset = config.getfloat('y_offset', 0.)
         self.z_offset = config.getfloat('z_offset')
+        self.z_offset_calibrate = 0
+        self.z_offset_change_flag = False
         self.probe_calibrate_z = 0.
         self.multi_probe_pending = False
         self.last_state = False
@@ -112,11 +114,11 @@ class PrinterProbe:
         return self.lift_speed
     def get_offsets(self):
         return self.x_offset, self.y_offset, self.z_offset
-    def _probe(self, speed):
+    def _probe(self, speed, gcmd=None):
         toolhead = self.printer.lookup_object('toolhead')
         curtime = self.printer.get_reactor().monotonic()
         if 'z' not in toolhead.get_status(curtime)['homed_axes']:
-            raise self.printer.command_error("Must home before probe")
+            raise self.printer.command_error("""{"code":"key96", "msg": "Must home before probe", "values": []}""")
         phoming = self.printer.lookup_object('homing')
         pos = toolhead.get_position()
         pos[2] = self.z_position
@@ -127,8 +129,10 @@ class PrinterProbe:
             if "Timeout during endstop homing" in reason:
                 reason += HINT_TIMEOUT
             raise self.printer.command_error(reason)
-        self.gcode.respond_info("probe at %.3f,%.3f is z=%.6f"
-                                % (epos[0], epos[1], epos[2]))
+        msg = "probe at %.3f,%.3f is z=%.6f" % (epos[0], epos[1], epos[2] - self.z_offset)
+        if gcmd and gcmd.get_commandline().startswith("Z_OFFSET_AUTO"):
+            msg = "Z_OFFSET_AUTO probe at %.3f,%.3f is z=%.6f" % (epos[0], epos[1], epos[2] - self.z_offset)
+        self.gcode.respond_info(msg)
         return epos[:3]
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
@@ -163,7 +167,26 @@ class PrinterProbe:
         positions = []
         while len(positions) < sample_count:
             # Probe position
-            pos = self._probe(speed)
+            try:
+                pos = self._probe(speed, gcmd)
+            except Exception as err:
+                reason = str(err)
+                logging.error(reason)
+                epos_state = False
+                if "Communication timeout during homing" in reason:
+                    count = 5
+                    while count:
+                        count -= 1
+                        self._move(probexy + [2 + sample_retract_dist], lift_speed)
+                        self.printer.get_reactor().pause(self.printer.get_reactor().monotonic() + 5.0)
+                        try:
+                            pos = self._probe(speed)
+                            epos_state = True
+                            break
+                        except Exception as err:
+                            logging.error(err)
+                if not epos_state:
+                    raise self.printer.command_error(reason)
             positions.append(pos)
             # Check samples tolerance
             z_positions = [p[2] for p in positions]
@@ -196,7 +219,8 @@ class PrinterProbe:
         gcmd.respond_info("probe: %s" % (["open", "TRIGGERED"][not not res],))
     def get_status(self, eventtime):
         return {'last_query': self.last_state,
-                'last_z_result': self.last_z_result}
+                'last_z_result': self.last_z_result,
+                'z_offset': self.z_offset_calibrate if self.z_offset_change_flag else self.z_offset}
     cmd_PROBE_ACCURACY_help = "Probe Z-height accuracy at current XY position"
     def cmd_PROBE_ACCURACY(self, gcmd):
         speed = gcmd.get_float("PROBE_SPEED", self.speed, above=0.)
@@ -273,12 +297,16 @@ class PrinterProbe:
             self.gcode.respond_info("Nothing to do: Z Offset is 0")
         else:
             new_calibrate = self.z_offset - offset
+            if new_calibrate < 0:
+                new_calibrate = 0
             self.gcode.respond_info(
                 "%s: z_offset: %.3f\n"
                 "The SAVE_CONFIG command will update the printer config file\n"
                 "with the above and restart the printer."
                 % (self.name, new_calibrate))
             configfile.set(self.name, 'z_offset', "%.3f" % (new_calibrate,))
+            self.z_offset_calibrate = new_calibrate
+            self.z_offset_change_flag = True
     cmd_Z_OFFSET_APPLY_PROBE_help = "Adjust the probe's z_offset"
 
 # Endstop wrapper that enables probe specific features
@@ -372,7 +400,7 @@ class ProbePointsHelper:
     def minimum_points(self,n):
         if len(self.probe_points) < n:
             raise self.printer.config_error(
-                "Need at least %d probe points for %s" % (n, self.name))
+                """{"code":"key98", "msg": "Need at least %d probe points for %s", "values": [%d, "%s"]}""" % (n, self.name, n, self.name))
     def update_probe_points(self, points, min_points):
         self.probe_points = points
         self.minimum_points(min_points)
@@ -418,8 +446,7 @@ class ProbePointsHelper:
         self.lift_speed = probe.get_lift_speed(gcmd)
         self.probe_offsets = probe.get_offsets()
         if self.horizontal_move_z < self.probe_offsets[2]:
-            raise gcmd.error("horizontal_move_z can't be less than"
-                             " probe's z_offset")
+            raise gcmd.error("""{"code": "key15", "msg": "horizontal_move_z can't be less than probe's z_offset"}""")
         probe.multi_probe_begin()
         while 1:
             done = self._move_next()
