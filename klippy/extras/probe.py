@@ -65,7 +65,8 @@ class ProbeCommandHelper:
     def get_status(self, eventtime):
         return {'name': self.name,
                 'last_query': self.last_state,
-                'last_z_result': self.last_z_result}
+                'last_z_result': self.last_z_result,
+                'z_offset': self.z_offset_calibrate if self.z_offset_change_flag else self.z_offset}
     cmd_QUERY_PROBE_help = "Return the status of the z-probe"
     def cmd_QUERY_PROBE(self, gcmd):
         if self.query_endstop is None:
@@ -164,6 +165,8 @@ class ProbeCommandHelper:
             return
         z_offset = self.probe.get_offsets()[2]
         new_calibrate = z_offset - offset
+        if new_calibrate < 0:
+            new_calibrate = 0
         gcmd.respond_info(
             "%s: z_offset: %.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
@@ -171,6 +174,8 @@ class ProbeCommandHelper:
             % (self.name, new_calibrate))
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.name, 'z_offset', "%.3f" % (new_calibrate,))
+        self.z_offset_calibrate = new_calibrate
+        self.z_offset_change_flag = True
 
 # Homing via probe:z_virtual_endstop
 class HomingViaProbeHelper:
@@ -307,11 +312,11 @@ class ProbeSessionHelper:
                 'samples_tolerance': samples_tolerance,
                 'samples_tolerance_retries': samples_retries,
                 'samples_result': samples_result}
-    def _probe(self, speed):
+    def _probe(self, speed, gcmd=None):
         toolhead = self.printer.lookup_object('toolhead')
         curtime = self.printer.get_reactor().monotonic()
         if 'z' not in toolhead.get_status(curtime)['homed_axes']:
-            raise self.printer.command_error("Must home before probe")
+            raise self.printer.command_error("""{"code":"key96", "msg": "Must home before probe", "values": []}""")
         pos = toolhead.get_position()
         pos[2] = self.z_position
         try:
@@ -325,8 +330,10 @@ class ProbeSessionHelper:
         self.printer.send_event("probe:update_results", epos)
         # Report results
         gcode = self.printer.lookup_object('gcode')
-        gcode.respond_info("probe at %.3f,%.3f is z=%.6f"
-                           % (epos[0], epos[1], epos[2]))
+        msg = "probe at %.3f,%.3f is z=%.6f" % (epos[0], epos[1], epos[2] - self.z_offset)
+        if gcmd and gcmd.get_commandline().startswith("Z_OFFSET_AUTO"):
+            msg = "Z_OFFSET_AUTO probe at %.3f,%.3f is z=%.6f" % (epos[0], epos[1], epos[2] - self.z_offset)
+        gcode.respond_info(msg)
         return epos[:3]
     def run_probe(self, gcmd):
         if not self.multi_probe_pending:
@@ -339,7 +346,26 @@ class ProbeSessionHelper:
         sample_count = params['samples']
         while len(positions) < sample_count:
             # Probe position
-            pos = self._probe(params['probe_speed'])
+            try:
+                pos = self._probe(speed, gcmd)
+            except Exception as err:
+                reason = str(err)
+                logging.error(reason)
+                epos_state = False
+                if "Communication timeout during homing" in reason:
+                    count = 5
+                    while count:
+                        count -= 1
+                        self._move(probexy + [2 + sample_retract_dist], lift_speed)
+                        self.printer.get_reactor().pause(self.printer.get_reactor().monotonic() + 5.0)
+                        try:
+                            pos = self._probe(speed)
+                            epos_state = True
+                            break
+                        except Exception as err:
+                            logging.error(err)
+                if not epos_state:
+                    raise self.printer.command_error(reason)
             positions.append(pos)
             # Check samples tolerance
             z_positions = [p[2] for p in positions]
@@ -565,6 +591,8 @@ class PrinterProbe:
         self.mcu_probe = ProbeEndstopWrapper(config)
         self.cmd_helper = ProbeCommandHelper(config, self,
                                              self.mcu_probe.query_endstop)
+        self.z_offset_calibrate = 0
+        self.z_offset_change_flag = False
         self.probe_offsets = ProbeOffsetsHelper(config)
         self.probe_session = ProbeSessionHelper(config, self.mcu_probe)
     def get_probe_params(self, gcmd=None):

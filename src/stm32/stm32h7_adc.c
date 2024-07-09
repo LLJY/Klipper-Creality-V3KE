@@ -15,6 +15,9 @@
 #define ADC_TEMPERATURE_PIN 0xfe
 DECL_ENUMERATION("pin", "ADC_TEMPERATURE", ADC_TEMPERATURE_PIN);
 
+#define ADC_TEMPERATURE_PIN 0xfe
+DECL_ENUMERATION("pin", "ADC_TEMPERATURE", ADC_TEMPERATURE_PIN);
+
 DECL_CONSTANT("ADC_MAX", 4095);
 
 #define ADCIN_BANK_SIZE 20
@@ -267,7 +270,10 @@ gpio_adc_setup(uint32_t pin)
     // Setup preselect (connect) channel on stm32h7
 #if CONFIG_MACH_STM32H7
     adc->PCSEL |= (1 << chan);
+#elif (CONFIG_MACH_STM32H723)
+    adc->PCSEL_RES0 |= (1 << chan);
 #endif
+
     return (struct gpio_adc){ .adc = adc, .chan = chan };
 }
 

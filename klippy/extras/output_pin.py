@@ -7,7 +7,7 @@
 PIN_MIN_TIME = 0.100
 RESEND_HOST_TIME = 0.300 + PIN_MIN_TIME
 MAX_SCHEDULE_TIME = 5.0
-
+import logging
 class PrinterOutputPin:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -54,6 +54,43 @@ class PrinterOutputPin:
         gcode.register_mux_command("SET_PIN", "PIN", pin_name,
                                    self.cmd_SET_PIN,
                                    desc=self.cmd_SET_PIN_help)
+
+        self.heaters = self.printer.load_object(config,"heaters")
+
+        if pin_name == "power":
+            self.power_timer = self.reactor.register_timer(
+                self.checkpwm, self.reactor.NOW+10)
+            self.ispweron = False
+    def set_poewon(self,value):
+
+        value /= self.scale
+        cycle_time = self.default_cycle_time
+
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.register_lookahead_callback(
+            lambda print_time: self._set_pin(print_time, value, cycle_time))
+
+
+        # toolhead = self.printer.lookup_object('toolhead')
+        # toolhead.register_lookahead_callback(
+        #     lambda print_time: self._set_pin(print_time, value, 0))
+    def checkpwm(self, eventtime):
+        systime = self.reactor.monotonic()
+        for heater in self.heaters.heaters.values():
+
+            eventtime = self.reactor.monotonic()
+            if heater.name == "heater_bed" :
+                if heater.check_busy(eventtime) :
+                    if self.ispweron == False and heater.target_temp != 0:
+                        self.set_poewon(0)
+                        self.ispweron = True
+
+                else:
+                    if self.ispweron == True:
+                        self.ispweron = False
+                        self.set_poewon(1)
+                        return systime + 10
+        return systime + 3
     def get_status(self, eventtime):
         return {'value': self.last_value}
     def _set_pin(self, print_time, value, is_resend=False):
@@ -69,6 +106,7 @@ class PrinterOutputPin:
         if self.resend_interval and self.resend_timer is None:
             self.resend_timer = self.reactor.register_timer(
                 self._resend_current_val, self.reactor.NOW)
+
     cmd_SET_PIN_help = "Set the value of an output pin"
     def cmd_SET_PIN(self, gcmd):
         # Read requested value

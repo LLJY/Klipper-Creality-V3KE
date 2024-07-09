@@ -193,7 +193,7 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM1,  GPIO('B',  3), 2, GPIO_FUNCTION(1)},
     {TIM3,  GPIO('B',  4), 1, GPIO_FUNCTION(1)},
     {TIM3,  GPIO('B',  5), 2, GPIO_FUNCTION(1)},
-  #if CONFIG_MACH_STM32G0Bx
+  #if !defined(CONFIG_MACH_STM32G071) || defined(CONFIG_MACH_STM32G0Bx)
     {TIM4,  GPIO('B',  6), 1, GPIO_FUNCTION(9)},
     {TIM4,  GPIO('B',  7), 2, GPIO_FUNCTION(9)},
     {TIM4,  GPIO('B',  8), 3, GPIO_FUNCTION(9)},
@@ -212,7 +212,7 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM14, GPIO('C', 12), 1, GPIO_FUNCTION(2)},
     {TIM16, GPIO('D',  0), 1, GPIO_FUNCTION(2)},
     {TIM17, GPIO('D',  1), 1, GPIO_FUNCTION(2)},
-  #if CONFIG_MACH_STM32G0Bx
+  #if !defined(CONFIG_MACH_STM32G071) || defined(CONFIG_MACH_STM32G0Bx)
     {TIM4,  GPIO('D', 12), 1, GPIO_FUNCTION(2)},
     {TIM4,  GPIO('D', 13), 2, GPIO_FUNCTION(2)},
     {TIM4,  GPIO('D', 14), 3, GPIO_FUNCTION(2)},
@@ -271,6 +271,10 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM16, GPIO('B', 8),  1, GPIO_FUNCTION(1)},
     {TIM17, GPIO('F', 7),  1, GPIO_FUNCTION(1)},
     {TIM17, GPIO('B', 9),  1, GPIO_FUNCTION(1)}
+#elif CONFIG_MACH_STM32G071
+	{TIM1, GPIO('C',11), 4, GPIO_FUNCTION(1)},
+	{TIM3, GPIO('B',0), 3, GPIO_FUNCTION(1)},
+	{TIM3, GPIO('B',1), 4, GPIO_FUNCTION(1)},
 #endif
 };
 
