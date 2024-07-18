@@ -367,14 +367,23 @@ class VirtualSD:
         cur_pos = f.tell()
         buf = ''
         while True:
-            b = str(f.read(1))
+            try:
+                b = str(f.read(1))
+            except UnicodeDecodeError as err:
+                logging.error("UnicodeDecodeError err:%s" % str(err))
+                cur_pos -= 1
+                if cur_pos < 0: break
+                f.seek(cur_pos)
+                continue
             buf = b + buf
             cur_pos -= 1
             if cur_pos < 0: break
             f.seek(cur_pos)
             if b.startswith("\n") or b.startswith("\r"):
                 buf = '\n'
-            if (buf.startswith("G1") or buf.startswith("G0") or buf.startswith(";")) and buf.endswith("\n"):
+            if (buf.startswith("G1") or buf.startswith("G0")) and buf.endswith("\n"):
+                if ";" in buf:
+                    buf = buf.split(";")[0]+"\n"
                 break
         return buf
     def getXYZE(self, file_path, file_position):
@@ -676,7 +685,7 @@ class VirtualSD:
             # Dispatch command
             self.cmd_from_sd = True
             line = lines.pop()
-            next_file_position = self.file_position + len(line) + 1
+            next_file_position = self.file_position + len(line.encode('utf-8')) + 1
             self.next_file_position = next_file_position
             end_time = interval_end_time = self.reactor.monotonic()
             if self.count_line % 4999 == 0:

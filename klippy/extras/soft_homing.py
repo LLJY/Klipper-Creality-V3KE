@@ -55,13 +55,14 @@ class SoftHomingInit:
         gcmd.respond_info('steppers[0].get_mcu_position():%d\n' %(steppers[0].get_mcu_position()))
         
         status_print = virtual_sdcard.get_status(1)
-        p_active = status_print['is_active']
-        p_pos = status_print['file_position']
-        gcmd.respond_info('p_active:%d p_pos:%d\n' %(p_active, p_pos))
-        if p_active > 0 and p_pos > 10:
-            check_flag = True
-        else :
-            check_flag = False
+        # p_active = status_print['is_active']
+        # p_pos = status_print['file_position']
+        # gcmd.respond_info('p_active:%d p_pos:%d\n' %(p_active, p_pos))
+        # if p_active > 0 and p_pos > 10:
+        #     check_flag = True
+        # else :
+        #     check_flag = False
+        check_flag = False
         if self.check_home_falg == 1:
             check_flag = False
         if self.check_home_falg == 2:
